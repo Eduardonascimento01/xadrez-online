@@ -1,0 +1,1844 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xadrez Online</title>
+
+<!-- =====================================================================
+     XADREZ ONLINE - VERSÃO 4
+     As 3 partes do jogo:
+       1) TABULEIRO -> desenhado por nós (HTML + CSS + SVG)
+       2) JUIZ      -> biblioteca chess.js (conhece todas as regras)
+       3) CARTEIRO  -> biblioteca PeerJS (leva os lances até o seu amigo)
+     Novidades da versão 3:
+       - Escolha da peça na promoção do peão
+       - Relógio (com ou sem acréscimo)
+       - Jogar contra o PC (3 níveis)
+       - Layout que se ajusta ao celular e ao PC, centralizado na tela
+     Novidades da versão 4:
+       - Desistir, propor empate e pedir revanche
+       - Sons (feitos pelo próprio navegador, sem arquivos de áudio)
+       - Arrastar a peça, além do toque
+       - Escolher a cor contra o PC e no convite
+       - Chat entre os dois jogadores online
+     ===================================================================== -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* =================== APARÊNCIA (CSS) ===================
+     Layout: uma "mesa" escura onde o tabuleiro é a única coisa colorida.
+     Celular: tudo empilhado. Tela larga: tabuleiro à esquerda, painel à
+     direita. O conjunto fica sempre no meio da tela. */
+
+  :root {
+    color-scheme: dark;
+
+    /* Cores da interface */
+    --fundo: #14161b;
+    --superficie: #1d2027;
+    --linha: #30343e;
+    --texto: #ece8df;
+    --texto-suave: #9da2ad;
+    --destaque: #e2b04a;
+    --perigo: #e5584f;
+
+    /* Cores do tabuleiro (o JavaScript troca ao mudar o tema) */
+    --casa-clara: #ead9b8;
+    --casa-escura: #a97b55;
+
+    /* Cores das peças */
+    --branca-corpo: #f8f4ea;
+    --branca-traco: #2a241f;
+    --preta-corpo: #2e2823;
+    --preta-traco: #0e0c0a;
+    --preta-detalhe: #e9dfcc;
+
+    --fonte-titulo: "Fraunces", Georgia, serif;
+    --fonte-texto: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --fonte-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+    /* TAMANHO DO TABULEIRO (celular): largura da tela menos as margens. */
+    --tam: min(100vw - 32px, 560px);
+    --largura-lateral: 320px;
+  }
+
+  /* TELA LARGA (tablet deitado, notebook, PC):
+     o tabuleiro é o MENOR entre 3 valores:
+       a) a largura que sobra depois do painel lateral
+       b) a altura da tela menos o topo e as faixas dos jogadores
+       c) um teto de 680px
+     Assim ele sempre cabe inteiro, sem precisar rolar a página. */
+  @media (min-width: 760px) {
+    :root {
+      --tam: min(100vw - 392px, max(100vh - 190px, 280px), 680px);
+      --tam: min(100vw - 392px, max(100dvh - 190px, 280px), 680px);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; height: 100%; }
+  body {
+    min-height: 100%;
+    display: flex;                 /* empilha topo + mesa */
+    flex-direction: column;
+    background: var(--fundo);
+    color: var(--texto);
+    font-family: var(--fonte-texto);
+    font-size: 16px;
+    line-height: 1.4;
+    padding: 0 16px 24px;
+  }
+
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--destaque);
+    outline-offset: 2px;
+  }
+  [hidden] { display: none !important; }
+
+  /* ---------- Topo ---------- */
+  .topo {
+    width: 100%;
+    max-width: var(--tam);
+    margin: 0 auto;
+    padding: 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .marca { display: flex; align-items: center; gap: 8px; }
+  .marca svg { width: 30px; height: 30px; fill: var(--destaque); }
+  .marca svg .e { fill: var(--fundo); }
+  .marca span { font-family: var(--fonte-titulo); font-size: 1.45rem; letter-spacing: .01em; }
+
+  /* ---------- Botões ---------- */
+  .botao {
+    border: 1px solid var(--linha);
+    background: var(--superficie);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-weight: 500;
+    text-align: center;
+    transition: border-color .15s;
+  }
+  .botao:hover { border-color: var(--texto-suave); }
+  .botao.principal {
+    background: var(--destaque);
+    border-color: var(--destaque);
+    color: #1c1505;
+    font-weight: 600;
+  }
+  .botao.pequeno { padding: 8px 12px; font-size: .92rem; }
+
+  /* Botõezinhos de escolha (relógio, nível) */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    border: 1px solid var(--linha);
+    background: var(--superficie);
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: .88rem;
+  }
+  .chip[aria-pressed="true"] { border-color: var(--destaque); color: var(--destaque); font-weight: 600; }
+
+  .rotulo {
+    margin: 0 0 8px;
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--texto-suave);
+  }
+
+  /* ---------- Mesa: tabuleiro + painel lateral ----------
+     "margin: auto" dentro de um flex centraliza na horizontal E na vertical. */
+  .mesa {
+    margin: auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .coluna-tabuleiro { width: var(--tam); display: grid; gap: 6px; }
+  .lateral { width: var(--tam); display: grid; gap: 12px; align-content: start; }
+
+  @media (min-width: 760px) {
+    .topo { max-width: calc(var(--tam) + var(--largura-lateral) + 28px); }
+    .mesa { grid-template-columns: auto var(--largura-lateral); gap: 28px; align-items: start; }
+    .lateral { width: var(--largura-lateral); padding-top: 46px; }
+  }
+
+  /* ---------- Faixa de cada jogador ---------- */
+  .jogador {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 2px;
+    opacity: .62;
+    transition: opacity .2s;
+  }
+  .jogador.na-vez { opacity: 1; }
+  .jogador .ficha {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--texto-suave);
+    flex: none;
+  }
+  .jogador .ficha.w { background: var(--branca-corpo); }
+  .jogador .ficha.b { background: var(--preta-corpo); }
+  .jogador.na-vez .ficha { border-color: var(--destaque); box-shadow: 0 0 0 3px rgba(226, 176, 74, .25); }
+  .jogador .nome { font-weight: 600; font-size: .95rem; white-space: nowrap; }
+  .jogador .capturadas { display: flex; flex-wrap: wrap; align-items: center; flex: 1; min-width: 0; }
+  .jogador .capturadas svg {
+    position: static; width: 19px; height: 19px; margin-right: -5px; filter: none;
+  }
+  .jogador .capturadas .peca.pb { stroke: #8d867b; }
+  .jogador .vantagem {
+    font-family: var(--fonte-mono);
+    font-size: .82rem;
+    color: var(--texto-suave);
+  }
+  /* Relógio de cada jogador */
+  .relogio {
+    font-family: var(--fonte-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    font-size: 1.05rem;
+    background: var(--superficie);
+    border: 1px solid var(--linha);
+    border-radius: 8px;
+    padding: 4px 10px;
+  }
+  .na-vez .relogio { background: var(--texto); color: var(--fundo); border-color: var(--texto); }
+  .relogio.pouco { color: var(--perigo); }
+  .na-vez .relogio.pouco { background: var(--perigo); color: #fff; border-color: var(--perigo); }
+
+  /* ---------- Tabuleiro ---------- */
+  .quadro-tabuleiro { position: relative; width: var(--tam); height: var(--tam); }
+
+  #tabuleiro {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 14px 36px rgba(0, 0, 0, .5);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;            /* o dedo arrasta a peça em vez de rolar a página */
+  }
+
+  .casa {
+    position: relative;
+    border: 0; padding: 0; margin: 0;
+    min-width: 0; min-height: 0;
+    display: block;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .casa.clara  { background: var(--casa-clara);  color: var(--casa-escura); }
+  .casa.escura { background: var(--casa-escura); color: var(--casa-clara); }
+  .casa:focus-visible { outline-offset: -3px; z-index: 2; }
+
+  .coord {
+    position: absolute;
+    font-family: var(--fonte-mono);
+    font-size: clamp(8px, calc(var(--tam) / 44), 13px);
+    font-weight: 500;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .coord.numero { top: 3px; left: 3px; }
+  .coord.letra  { bottom: 3px; right: 4px; }
+  .sem-coordenadas .coord { display: none; }
+
+  .casa.ultimo::before, .casa.selecionada::before, .casa.xeque::before {
+    content: ""; position: absolute; inset: 0;
+  }
+  .casa.ultimo::before      { background: rgba(255, 214, 92, .46); }
+  .casa.selecionada::before { background: rgba(255, 214, 92, .62); }
+  .casa.xeque::before {
+    background: radial-gradient(circle, rgba(229, 88, 79, .95) 0%, rgba(229, 88, 79, .55) 45%, transparent 75%);
+  }
+  .casa.destino::after {
+    content: ""; position: absolute;
+    inset: 36%;
+    border-radius: 50%;
+    background: rgba(20, 20, 20, .32);
+  }
+  .casa.destino.captura::after {
+    inset: 5%;
+    background: none;
+    border: calc(var(--tam) / 110) solid rgba(20, 20, 20, .32);
+  }
+
+  /* ---------- Peças (SVG) ---------- */
+  .peca {
+    position: absolute;
+    inset: 4%;
+    width: 92%;
+    height: 92%;
+    stroke-width: 3.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    filter: drop-shadow(0 1.5px 1px rgba(0, 0, 0, .28));
+    pointer-events: none;
+  }
+  .peca.pw { fill: var(--branca-corpo); stroke: var(--branca-traco); }
+  .peca.pb { fill: var(--preta-corpo);  stroke: var(--preta-traco); }
+  .peca .d { fill: none; }
+  .peca.pb .d { stroke: var(--preta-detalhe); stroke-width: 2.4; }
+  .peca .e { stroke: none; }
+  .peca.pw .e { fill: var(--branca-traco); }
+  .peca.pb .e { fill: var(--preta-detalhe); }
+  .peca .txt { stroke-width: 1.4; font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "DejaVu Sans", sans-serif; }
+
+  .peca.pousou { animation: pousar .16s ease-out; }
+  @keyframes pousar { from { transform: scale(1.14); } to { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) {
+    .peca.pousou { animation: none; }
+    * { transition: none !important; }
+  }
+
+  /* ---------- Escolha da promoção (aparece por cima do tabuleiro) ---------- */
+  #promocao {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    border-radius: 8px;
+    background: rgba(8, 9, 12, .72);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  #promocao p { margin: 0; font-weight: 600; }
+  .escolhas { display: flex; gap: 8px; }
+  .escolhas button {
+    position: relative;
+    width: calc(var(--tam) / 5.2);
+    height: calc(var(--tam) / 5.2);
+    border: 2px solid transparent;
+    border-radius: 12px;
+    background: var(--casa-clara);
+  }
+  .escolhas button:hover { border-color: var(--destaque); }
+
+  /* ---------- Arrastar a peça ---------- */
+  .casa.arrastando .peca { opacity: .25; }     /* a peça "sai" da casa de origem */
+  .fantasma {                                   /* cópia que segue o dedo/mouse */
+    position: fixed;
+    z-index: 20;
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  .fantasma .peca { inset: 0; width: 100%; height: 100%; }
+
+  /* ---------- Proposta do adversário (empate ou revanche) ---------- */
+  #proposta {
+    background: var(--superficie);
+    border: 1px solid var(--destaque);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 10px;
+  }
+  #proposta p { margin: 0; font-weight: 500; }
+  #proposta .dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* ---------- Chat ---------- */
+  .chat {
+    background: var(--superficie);
+    border: 1px solid var(--linha);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 8px;
+  }
+  #mensagens {
+    max-height: 140px;
+    overflow-y: auto;
+    font-size: .92rem;
+    display: grid;
+    gap: 4px;
+  }
+  #mensagens p { margin: 0; overflow-wrap: anywhere; }
+  #mensagens strong { color: var(--texto-suave); font-weight: 600; }
+  #mensagens:empty::before { content: "Diga oi ao seu adversário."; color: var(--texto-suave); }
+  #formChat { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  #textoChat {
+    font: inherit;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--linha);
+    background: var(--fundo);
+    color: var(--texto);
+  }
+
+  /* ---------- Painel lateral ---------- */
+  .status {
+    background: var(--superficie);
+    border: 1px solid var(--linha);
+    border-left: 3px solid var(--destaque);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-height: 48px;
+    font-weight: 500;
+  }
+  .status.alerta { border-left-color: var(--perigo); }
+  .status.fim    { border-left-color: var(--texto); }
+
+  #painel, #convite { display: grid; gap: 10px; }
+  #painel .grupo { margin-bottom: 4px; }
+  #acoes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .dica { margin: 0; font-size: .88rem; color: var(--texto-suave); }
+
+  #link {
+    font-family: var(--fonte-mono);
+    font-size: .85rem;
+    width: 100%;
+    padding: 11px;
+    border-radius: 10px;
+    border: 1px solid var(--linha);
+    background: var(--fundo);
+    color: var(--texto);
+  }
+
+  .lances {
+    background: var(--superficie);
+    border: 1px solid var(--linha);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  #listaLances {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: var(--fonte-mono);
+    font-size: .9rem;
+    font-variant-numeric: tabular-nums;
+  }
+  #listaLances li { display: grid; grid-template-columns: 2.4em 1fr 1fr; padding: 3px 0; }
+  #listaLances .n { color: var(--texto-suave); }
+
+  /* ---------- Tela de Aparência ---------- */
+  .folha {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(8, 9, 12, .62);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .folha-conteudo {
+    width: 100%;
+    max-width: 480px;
+    max-height: 92%;
+    overflow-y: auto;
+    background: var(--superficie);
+    border: 1px solid var(--linha);
+    border-radius: 16px 16px 0 0;
+    padding: 18px 16px 24px;
+    display: grid;
+    gap: 18px;
+  }
+  @media (min-width: 600px) {
+    .folha { align-items: center; }
+    .folha-conteudo { border-radius: 16px; }
+  }
+  .folha-topo { display: flex; align-items: center; justify-content: space-between; }
+  .folha-topo h2 { margin: 0; font-family: var(--fonte-titulo); font-size: 1.3rem; }
+
+  .opcoes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .opcao {
+    background: var(--fundo);
+    border: 2px solid var(--linha);
+    border-radius: 12px;
+    padding: 10px 6px 8px;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    font-size: .85rem;
+  }
+  .opcao[aria-pressed="true"] { border-color: var(--destaque); }
+  .mini {
+    width: 46px; height: 46px;
+    border-radius: 6px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .amostra { display: flex; }
+  .amostra .quadro { position: relative; width: 38px; height: 38px; }
+  .amostra .quadro:first-child { background: var(--casa-escura); border-radius: 6px 0 0 6px; }
+  .amostra .quadro:last-child  { background: var(--casa-clara);  border-radius: 0 6px 6px 0; }
+
+  .chave { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+  .chave input { width: 20px; height: 20px; accent-color: var(--destaque); }
+</style>
+</head>
+
+<body>
+  <!-- =================== ESTRUTURA (HTML) =================== -->
+
+  <header class="topo">
+    <div class="marca">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><path d="M33 76 C34 62 47 56 45 44 L35 51 C30 54 23 51 23 45 C23 41 28 38 31 33 C35 26 37 20 44 16 L45 8 L53 15 C68 18 76 36 70 76 Z"/><circle class="e" cx="41" cy="30" r="3"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/></svg>
+      <span>Xadrez</span>
+    </div>
+    <button class="botao pequeno" id="btnAparencia">Aparência</button>
+  </header>
+
+  <main class="mesa">
+    <section class="coluna-tabuleiro">
+      <div class="jogador" id="jogadorCima"></div>
+
+      <div class="quadro-tabuleiro">
+        <!-- O JavaScript preenche esta div com as 64 casas. -->
+        <div id="tabuleiro" aria-label="Tabuleiro de xadrez"></div>
+
+        <!-- Escolha da peça quando o peão chega ao fim (começa escondida) -->
+        <div id="promocao" hidden>
+          <p>Promover o peão para:</p>
+          <div class="escolhas" id="escolhasPromocao"></div>
+          <button class="botao pequeno" id="btnCancelarPromocao">Cancelar</button>
+        </div>
+      </div>
+
+      <div class="jogador" id="jogadorBaixo"></div>
+    </section>
+
+    <aside class="lateral">
+      <div class="status" id="status" role="status">Escolha como quer jogar.</div>
+
+      <!-- Menu inicial -->
+      <div id="painel">
+        <div class="grupo">
+          <h2 class="rotulo">Relógio</h2>
+          <div class="chips" id="chipsRelogio"></div>
+        </div>
+        <div class="grupo">
+          <h2 class="rotulo">Nível do PC</h2>
+          <div class="chips" id="chipsNivel"></div>
+        </div>
+        <div class="grupo">
+          <h2 class="rotulo">Sua cor (contra o PC e no convite)</h2>
+          <div class="chips" id="chipsCor"></div>
+        </div>
+        <button class="botao principal" id="btnOnline">Criar partida online e convidar</button>
+        <button class="botao" id="btnPC">Jogar contra o PC</button>
+        <button class="botao" id="btnLocal">Jogar a dois neste aparelho</button>
+      </div>
+
+      <!-- Link do convite -->
+      <div id="convite" hidden>
+        <p class="dica">Envie este link para o seu amigo:</p>
+        <input id="link" readonly aria-label="Link do convite">
+        <button class="botao principal" id="btnCopiar">Copiar link</button>
+      </div>
+
+      <!-- Botões durante a partida -->
+      <div id="acoes" hidden>
+        <button class="botao" id="btnDesistir">Desistir</button>
+        <button class="botao" id="btnEmpate">Propor empate</button>
+        <button class="botao" id="btnNova">Nova partida</button>
+        <button class="botao" id="btnMenu">Menu</button>
+      </div>
+
+      <!-- Aparece quando o adversário propõe empate ou revanche -->
+      <div id="proposta" hidden>
+        <p id="textoProposta"></p>
+        <div class="dupla">
+          <button class="botao principal" id="btnAceitar">Aceitar</button>
+          <button class="botao" id="btnRecusar">Recusar</button>
+        </div>
+      </div>
+
+      <!-- Chat (só no modo online, depois de conectar) -->
+      <section class="chat" id="chat" hidden>
+        <h2 class="rotulo">Chat</h2>
+        <div id="mensagens" aria-live="polite"></div>
+        <form id="formChat">
+          <input id="textoChat" maxlength="200" autocomplete="off"
+                 placeholder="Escreva uma mensagem" aria-label="Mensagem">
+          <button class="botao pequeno" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <section class="lances">
+        <h2 class="rotulo">Lances</h2>
+        <ol id="listaLances"></ol>
+        <p class="dica" id="semLances">Os lances da partida aparecem aqui.</p>
+      </section>
+    </aside>
+  </main>
+
+  <!-- Tela de Aparência (começa escondida) -->
+  <div class="folha" id="folha" hidden>
+    <div class="folha-conteudo" role="dialog" aria-modal="true" aria-labelledby="tituloFolha">
+      <div class="folha-topo">
+        <h2 id="tituloFolha">Aparência</h2>
+        <button class="botao pequeno" id="btnFechar">Fechar</button>
+      </div>
+      <div>
+        <h3 class="rotulo">Tabuleiro</h3>
+        <div class="opcoes" id="opcoesTema"></div>
+      </div>
+      <div>
+        <h3 class="rotulo">Peças</h3>
+        <div class="opcoes" id="opcoesPecas"></div>
+      </div>
+      <div>
+        <h3 class="rotulo">Ajudas</h3>
+        <label class="chave"><input type="checkbox" id="chkCoordenadas"> Mostrar coordenadas (a–h, 1–8)</label>
+        <label class="chave"><input type="checkbox" id="chkDicas"> Mostrar para onde a peça pode ir</label>
+        <label class="chave"><input type="checkbox" id="chkSons"> Sons</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== BIBLIOTECAS PRONTAS =================== -->
+  <!-- O JUIZ: chess.js (licença BSD) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <!-- O CARTEIRO: PeerJS (licença MIT) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+<script>
+/* =====================================================================
+   COMPORTAMENTO (JavaScript)
+   ===================================================================== */
+
+/* ---------- 1. CATÁLOGOS ----------
+   Para criar um tema, tempo ou nível novo, basta adicionar uma linha. */
+
+const TEMAS = {
+  nogueira: { nome: 'Nogueira', clara: '#ead9b8', escura: '#a97b55' },
+  torneio:  { nome: 'Torneio',  clara: '#e7ebd0', escura: '#5e8c5a' },
+  oceano:   { nome: 'Oceano',   clara: '#dfe8ef', escura: '#6a8eae' },
+  grafite:  { nome: 'Grafite',  clara: '#d4d6d9', escura: '#70757d' },
+  ametista: { nome: 'Ametista', clara: '#e8e0f0', escura: '#8b72ad' },
+  coral:    { nome: 'Coral',    clara: '#f3dfd3', escura: '#c0705a' }
+};
+
+// base = segundos que cada jogador começa; inc = segundos ganhos a cada lance.
+const TEMPOS = {
+  sem: { nome: 'Sem relógio', base: 0,   inc: 0 },
+  t3:  { nome: '3 min',       base: 180, inc: 0 },
+  t5:  { nome: '5 min',       base: 300, inc: 0 },
+  t10: { nome: '10 min',      base: 600, inc: 0 },
+  t15: { nome: '15 + 10',     base: 900, inc: 10 }
+};
+
+// profundidade = quantos lances à frente o PC "imagina".
+const NIVEIS = {
+  facil:   { nome: 'Fácil',   profundidade: 1 },
+  medio:   { nome: 'Médio',   profundidade: 2 },
+  dificil: { nome: 'Difícil', profundidade: 3 }
+};
+
+// Cor com que você joga contra o PC ou quando cria um convite.
+const CORES = { w: 'Brancas', b: 'Pretas', sorteio: 'Sorteio' };
+
+/* Cada peça é um desenho SVG numa tela imaginária de 100 x 100.
+   Letras (padrão do chess.js, em inglês):
+   p = peão, r = torre, n = cavalo, b = bispo, q = dama, k = rei */
+const PECAS = {
+  classico: {
+    p: '<path d="M43 48 C43 60 33 65 31 76 H69 C67 65 57 60 57 48 Z"/><ellipse cx="50" cy="47" rx="14" ry="4.5"/><circle cx="50" cy="31" r="12.5"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>',
+    r: '<path d="M35 42 H65 L68 76 H32 Z"/><path d="M27 16 h11 v7 h7 v-7 h10 v7 h7 v-7 h11 v18 l-6 8 H33 l-6 -8 Z"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>',
+    n: '<path d="M33 76 C34 62 47 56 45 44 L35 51 C30 54 23 51 23 45 C23 41 28 38 31 33 C35 26 37 20 44 16 L45 8 L53 15 C68 18 76 36 70 76 Z"/><circle class="e" cx="41" cy="30" r="2.4"/><path class="d" d="M58 23 C65 33 67 48 63 66"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>',
+    b: '<path d="M44 54 C44 63 34 67 31 76 H69 C66 67 56 63 56 54 Z"/><ellipse cx="50" cy="52" rx="15" ry="4.5"/><path d="M50 15 C63 27 67 38 60 49 H40 C33 38 37 27 50 15 Z"/><circle cx="50" cy="12" r="4.5"/><path class="d" d="M56 27 L48 38"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>',
+    q: '<path d="M35 58 H65 L69 76 H31 Z"/><path class="d" d="M36 65 H64"/><path d="M22 30 L33 58 H67 L78 30 L64 45 L59 22 L50 43 L41 22 L36 45 Z"/><circle cx="22" cy="27" r="4.5"/><circle cx="41" cy="19" r="4.5"/><circle cx="59" cy="19" r="4.5"/><circle cx="78" cy="27" r="4.5"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>',
+    k: '<path d="M35 58 H65 L69 76 H31 Z"/><path class="d" d="M36 65 H64"/><path d="M28 34 C36 28 44 28 50 34 C56 28 64 28 72 34 L66 58 H34 Z"/><path d="M46.5 8 h7 v6 h6 v7 h-6 v10 h-7 v-10 h-6 v-7 h6 Z"/><path d="M27 76 H73 L78 84 V89 H22 V84 Z"/>'
+  },
+  moderno: {
+    p: '<circle cx="50" cy="34" r="14"/><path d="M38 54 H62 L70 88 H30 Z"/>',
+    r: '<path d="M28 14 H40 V24 H60 V14 H72 V40 H28 Z"/><path d="M34 46 H66 L72 88 H28 Z"/>',
+    n: '<path d="M30 88 L36 52 L22 44 L46 12 H66 L72 88 Z"/><circle class="e" cx="45" cy="30" r="2.6"/>',
+    b: '<path d="M50 10 L68 46 H32 Z"/><path d="M38 52 H62 L70 88 H30 Z"/>',
+    q: '<path d="M22 18 L36 40 L50 14 L64 40 L78 18 L70 48 H30 Z"/><path d="M34 54 H66 L72 88 H28 Z"/>',
+    k: '<path d="M44 8 H56 V16 H64 V28 H56 V36 H70 L66 48 H34 L30 36 H44 V28 H36 V16 H44 Z"/><path d="M34 54 H66 L72 88 H28 Z"/>'
+  }
+};
+
+const NOMES_CONJUNTOS = { classico: 'Clássico', moderno: 'Moderno', simbolos: 'Símbolos' };
+const GLIFOS = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+const NOME_PECA = { p: 'peão', r: 'torre', n: 'cavalo', b: 'bispo', q: 'dama', k: 'rei' };
+const VALOR = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+function svgPeca(tipo, cor, conjunto, classeExtra) {
+  const miolo = conjunto === 'simbolos'
+    ? '<text class="txt" x="50" y="80" text-anchor="middle" font-size="86">' + GLIFOS[tipo] + '︎</text>'
+    : PECAS[conjunto][tipo];
+  return '<svg class="peca p' + cor + (classeExtra ? ' ' + classeExtra : '') +
+         '" viewBox="0 0 100 100" aria-hidden="true">' + miolo + '</svg>';
+}
+
+
+/* ---------- 2. PREFERÊNCIAS (ficam salvas no aparelho) ---------- */
+
+const prefs = { tema: 'nogueira', pecas: 'classico', coordenadas: true, dicas: true,
+                tempo: 'sem', nivel: 'medio', cor: 'w', sons: true };
+
+function carregarPrefs() {
+  try {
+    const salvo = JSON.parse(localStorage.getItem('xadrez-prefs') || '{}');
+    if (TEMAS[salvo.tema]) prefs.tema = salvo.tema;
+    if (NOMES_CONJUNTOS[salvo.pecas]) prefs.pecas = salvo.pecas;
+    if (TEMPOS[salvo.tempo]) prefs.tempo = salvo.tempo;
+    if (NIVEIS[salvo.nivel]) prefs.nivel = salvo.nivel;
+    if (typeof salvo.coordenadas === 'boolean') prefs.coordenadas = salvo.coordenadas;
+    if (typeof salvo.dicas === 'boolean') prefs.dicas = salvo.dicas;
+    if (CORES[salvo.cor]) prefs.cor = salvo.cor;
+    if (typeof salvo.sons === 'boolean') prefs.sons = salvo.sons;
+  } catch (erro) { /* sem preferências salvas: usa o padrão */ }
+}
+
+function salvarPrefs() {
+  try { localStorage.setItem('xadrez-prefs', JSON.stringify(prefs)); } catch (erro) {}
+}
+
+function aplicarTema() {
+  const tema = TEMAS[prefs.tema];
+  document.documentElement.style.setProperty('--casa-clara', tema.clara);
+  document.documentElement.style.setProperty('--casa-escura', tema.escura);
+  elTabuleiro.classList.toggle('sem-coordenadas', !prefs.coordenadas);
+}
+
+
+/* ---------- 3. ESTADO DO JOGO ---------- */
+
+const jogo = new Chess();   // o juiz
+
+let modo = null;            // null (menu), 'local', 'pc' ou 'online'
+let minhaCor = 'w';         // 'w' = brancas, 'b' = pretas
+let selecionada = null;     // casa tocada, ex.: 'e2'
+let destinos = [];          // casas para onde a peça selecionada pode ir
+let ultimoLance = null;     // { from, to }
+let animarCasa = null;      // casa onde a peça acabou de pousar
+let promocaoPendente = null;// { de, para } enquanto o jogador escolhe a peça
+// Fim de jogo que o juiz não conhece. Exemplos:
+//   { tipo: 'tempo', perdedor: 'w' }   { tipo: 'desistencia', perdedor: 'b' }   { tipo: 'acordo' }
+let resultado = null;
+let partidaId = 0;          // muda a cada partida (para o PC não jogar numa partida antiga)
+
+let peer = null;            // "agência dos correios" (PeerJS)
+let conexao = null;         // canal aberto com o adversário
+let anfitriao = false;      // true para quem CRIOU a sala online
+
+let arrasto = null;         // dados da peça que está sendo arrastada
+let propostaPendente = null;// 'empate' ou 'revanche' que o adversário propôs
+let propusEmpate = false;   // eu propus empate e espero a resposta?
+let propusRevanche = false; // eu pedi revanche e espero a resposta?
+let confirmandoDesistencia = false;
+
+// Relógio: tempos guardados em milissegundos (1 segundo = 1000 ms).
+const relogio = { ligado: false, base: 0, inc: 0, w: 0, b: 0, rodando: false, ultimo: 0 };
+
+const PREFIXO_SALA = 'xadrez-v1-';
+
+const $ = (id) => document.getElementById(id);
+const elTabuleiro = $('tabuleiro');
+const elStatus    = $('status');
+const elPainel    = $('painel');
+const elConvite   = $('convite');
+const elLink      = $('link');
+const elAcoes     = $('acoes');
+const elPromocao  = $('promocao');
+
+// A partida acabou? Ou o juiz diz (mate, empate) ou acabou por tempo.
+function acabou() { return jogo.game_over() || resultado !== null; }
+
+
+/* ---------- 4. DESENHAR O TABULEIRO ---------- */
+
+// Quem joga de pretas (online ou contra o PC) vê o tabuleiro virado.
+function estaVirado() { return (modo === 'online' || modo === 'pc') && minhaCor === 'b'; }
+
+function casaDoRei(cor) {
+  const posicao = jogo.board();
+  for (let l = 0; l < 8; l++) {
+    for (let c = 0; c < 8; c++) {
+      const p = posicao[l][c];
+      if (p && p.type === 'k' && p.color === cor) return 'abcdefgh'[c] + (8 - l);
+    }
+  }
+  return null;
+}
+
+function desenhar() {
+  elTabuleiro.innerHTML = '';
+
+  const posicao = jogo.board();
+  const colunas = 'abcdefgh';
+  const virado = estaVirado();
+  const reiEmXeque = jogo.in_check() ? casaDoRei(jogo.turn()) : null;
+
+  for (let i = 0; i < 8; i++) {               // i = linha na tela
+    for (let j = 0; j < 8; j++) {             // j = coluna na tela
+      const linha  = virado ? 7 - i : i;
+      const coluna = virado ? 7 - j : j;
+      const casa = colunas[coluna] + (8 - linha);
+      const peca = posicao[linha][coluna];
+
+      const botao = document.createElement('button');
+      botao.className = 'casa ' + ((linha + coluna) % 2 === 0 ? 'clara' : 'escura');
+      botao.setAttribute('aria-label',
+        casa + (peca ? ', ' + NOME_PECA[peca.type] + (peca.color === 'w' ? ' branco' : ' preto') : ''));
+
+      let html = '';
+      if (j === 0) html += '<span class="coord numero">' + (8 - linha) + '</span>';
+      if (i === 7) html += '<span class="coord letra">' + colunas[coluna] + '</span>';
+      if (peca) html += svgPeca(peca.type, peca.color, prefs.pecas, casa === animarCasa ? 'pousou' : '');
+      botao.innerHTML = html;
+
+      if (ultimoLance && (casa === ultimoLance.from || casa === ultimoLance.to)) botao.classList.add('ultimo');
+      if (casa === selecionada) botao.classList.add('selecionada');
+      if (casa === reiEmXeque) botao.classList.add('xeque');
+      if (prefs.dicas && destinos.includes(casa)) {
+        botao.classList.add('destino');
+        if (peca) botao.classList.add('captura');
+      }
+
+      botao.dataset.casa = casa;              // etiqueta: qual casa é este botão
+      elTabuleiro.appendChild(botao);
+    }
+  }
+  animarCasa = null;
+
+  // Se o tabuleiro for redesenhado no meio de um arrasto, mantém a origem apagada.
+  if (arrasto && arrasto.movido) marcarOrigemDoArrasto();
+
+  desenharJogadores();
+  desenharLances();
+  atualizarBotoes();
+}
+
+
+/* ---------- 5. FAIXAS DOS JOGADORES E LISTA DE LANCES ---------- */
+
+function desenharJogadores() {
+  const capturadas = { w: [], b: [] };
+  jogo.history({ verbose: true }).forEach((lance) => {
+    if (lance.captured) capturadas[lance.color].push(lance.captured);
+  });
+
+  const soma = { w: 0, b: 0 };
+  jogo.board().forEach((linha) => linha.forEach((p) => { if (p) soma[p.color] += VALOR[p.type]; }));
+
+  const corDeBaixo = estaVirado() ? 'b' : 'w';
+  const corDeCima  = corDeBaixo === 'w' ? 'b' : 'w';
+  preencherFaixa($('jogadorBaixo'), corDeBaixo, capturadas, soma);
+  preencherFaixa($('jogadorCima'),  corDeCima,  capturadas, soma);
+  mostrarRelogios();
+}
+
+function preencherFaixa(el, cor, capturadas, soma) {
+  const outra = cor === 'w' ? 'b' : 'w';
+  let nome = cor === 'w' ? 'Brancas' : 'Pretas';
+  if (modo === 'online') nome = (cor === minhaCor ? 'Você' : 'Adversário') + ' · ' + nome.toLowerCase();
+  if (modo === 'pc')     nome = (cor === minhaCor ? 'Você' : 'PC') + ' · ' + nome.toLowerCase();
+
+  const lista = capturadas[cor].slice().sort((a, b) => VALOR[b] - VALOR[a]);
+  const icones = lista.map((tipo) => svgPeca(tipo, outra, prefs.pecas)).join('');
+  const diferenca = soma[cor] - soma[outra];
+
+  el.className = 'jogador' + (modo && !acabou() && jogo.turn() === cor ? ' na-vez' : '');
+  el.innerHTML =
+    '<span class="ficha ' + cor + '"></span>' +
+    '<span class="nome">' + nome + '</span>' +
+    '<span class="capturadas">' + icones + '</span>' +
+    '<span class="vantagem">' + (diferenca > 0 ? '+' + diferenca : '') + '</span>' +
+    (relogio.ligado ? '<span class="relogio" data-cor="' + cor + '"></span>' : '');
+}
+
+// Troca as letras dos lances para o português: R rei, D dama, T torre, B bispo, C cavalo.
+function emPortugues(san) {
+  const troca = { K: 'R', Q: 'D', R: 'T', B: 'B', N: 'C' };
+  return san.replace(/[KQRBN]/g, (letra) => troca[letra]);
+}
+
+function desenharLances() {
+  const historico = jogo.history();
+  const lista = $('listaLances');
+  let html = '';
+  for (let i = 0; i < historico.length; i += 2) {
+    html += '<li><span class="n">' + (i / 2 + 1) + '.</span>' +
+            '<span>' + emPortugues(historico[i]) + '</span>' +
+            '<span>' + (historico[i + 1] ? emPortugues(historico[i + 1]) : '') + '</span></li>';
+  }
+  lista.innerHTML = html;
+  lista.scrollTop = lista.scrollHeight;
+  $('semLances').hidden = historico.length > 0;
+}
+
+
+/* ---------- 6. TOQUES DO JOGADOR ---------- */
+
+// O jogador pode mexer nas peças agora?
+function podeMexer() {
+  if (modo === null || acabou() || promocaoPendente) return false;
+  if (modo === 'online') {
+    if (!conexao || !conexao.open) return false;   // adversário ainda não chegou
+    if (jogo.turn() !== minhaCor) return false;    // não é a minha vez
+  }
+  if (modo === 'pc' && jogo.turn() !== minhaCor) return false;   // vez do PC
+  return true;
+}
+
+function selecionar(casa) {
+  selecionada = casa;
+  destinos = casa ? jogo.moves({ square: casa, verbose: true }).map((lance) => lance.to) : [];
+}
+
+// Move de uma casa para outra; se for promoção, pergunta a peça antes.
+function tentarMover(de, para) {
+  const ehPromocao = jogo.moves({ square: de, verbose: true })
+    .some((lance) => lance.to === para && lance.promotion);
+  if (ehPromocao) abrirPromocao(de, para);
+  else fazerLance(de, para, true);
+}
+
+// TOQUE EM 2 TEMPOS (também usado pelo teclado): 1º a peça, 2º o destino.
+function aoTocar(casa) {
+  if (!podeMexer()) return;
+
+  if (selecionada && destinos.includes(casa)) {
+    tentarMover(selecionada, casa);
+    return;
+  }
+  const peca = jogo.get(casa);
+  selecionar(peca && peca.color === jogo.turn() && casa !== selecionada ? casa : null);
+  desenhar();
+}
+
+/* ARRASTAR A PEÇA
+   Usamos "pointer events": servem igual para mouse, dedo e caneta.
+     pointerdown = encostou    pointermove = moveu    pointerup = soltou
+   Ao encostar numa peça sua, ela é selecionada. Se você mover o dedo,
+   criamos um "fantasma" (cópia da peça) que segue o dedo. Ao soltar,
+   descobrimos em qual casa o dedo está e tentamos o lance. */
+
+elTabuleiro.addEventListener('pointerdown', (evento) => {
+  if (evento.pointerType === 'mouse' && evento.button !== 0) return;   // só o botão esquerdo
+  const alvo = evento.target.closest('.casa');
+  if (!alvo || !podeMexer()) return;
+  const casa = alvo.dataset.casa;
+  evento.preventDefault();
+
+  // 2º toque num destino válido: joga.
+  if (selecionada && destinos.includes(casa)) {
+    tentarMover(selecionada, casa);
+    return;
+  }
+
+  const peca = jogo.get(casa);
+  if (peca && peca.color === jogo.turn()) {
+    const jaEstava = (casa === selecionada);
+    selecionar(casa);
+    desenhar();
+    arrasto = { de: casa, tipo: peca.type, cor: peca.color, id: evento.pointerId,
+                x: evento.clientX, y: evento.clientY, movido: false, jaEstava: jaEstava, fantasma: null };
+    // "Captura" o ponteiro: continuamos recebendo os movimentos mesmo fora do tabuleiro.
+    try { elTabuleiro.setPointerCapture(evento.pointerId); } catch (erro) {}
+  } else {
+    selecionar(null);
+    desenhar();
+  }
+});
+
+elTabuleiro.addEventListener('pointermove', (evento) => {
+  if (!arrasto || evento.pointerId !== arrasto.id) return;
+
+  if (!arrasto.movido) {
+    // Só vira "arrasto" depois de mover uns 6 pixels (senão é um toque comum).
+    if (Math.hypot(evento.clientX - arrasto.x, evento.clientY - arrasto.y) < 6) return;
+    arrasto.movido = true;
+    const lado = elTabuleiro.clientWidth / 8;
+    const fantasma = document.createElement('div');
+    fantasma.className = 'fantasma';
+    fantasma.style.width = lado + 'px';
+    fantasma.style.height = lado + 'px';
+    fantasma.innerHTML = svgPeca(arrasto.tipo, arrasto.cor, prefs.pecas);
+    document.body.appendChild(fantasma);
+    arrasto.fantasma = fantasma;
+    marcarOrigemDoArrasto();
+  }
+  arrasto.fantasma.style.left = evento.clientX + 'px';
+  arrasto.fantasma.style.top = evento.clientY + 'px';
+});
+
+elTabuleiro.addEventListener('pointerup', (evento) => {
+  if (!arrasto || evento.pointerId !== arrasto.id) return;
+  const a = arrasto;
+  cancelarArrasto();
+
+  if (a.movido) {
+    // Qual casa está embaixo do dedo?
+    const el = document.elementFromPoint(evento.clientX, evento.clientY);
+    const alvo = el ? el.closest('.casa') : null;
+    const casa = (alvo && elTabuleiro.contains(alvo)) ? alvo.dataset.casa : null;
+    if (casa && casa !== a.de && destinos.includes(casa) && podeMexer()) {
+      tentarMover(a.de, casa);
+    } else {
+      desenhar();                 // soltou num lugar inválido: a peça volta
+    }
+  } else if (a.jaEstava) {
+    selecionar(null);             // tocou de novo na mesma peça: desmarca
+    desenhar();
+  }
+});
+
+elTabuleiro.addEventListener('pointercancel', () => { cancelarArrasto(); desenhar(); });
+
+function marcarOrigemDoArrasto() {
+  const origem = elTabuleiro.querySelector('[data-casa="' + arrasto.de + '"]');
+  if (origem) origem.classList.add('arrastando');
+}
+
+function cancelarArrasto() {
+  if (arrasto && arrasto.fantasma) arrasto.fantasma.remove();
+  arrasto = null;
+}
+
+// TECLADO: Enter/Espaço num botão gera um "click" com detail = 0.
+// (Cliques de mouse/dedo têm detail >= 1 e já foram tratados acima.)
+elTabuleiro.addEventListener('click', (evento) => {
+  if (evento.detail !== 0) return;
+  const alvo = evento.target.closest('.casa');
+  if (alvo) aoTocar(alvo.dataset.casa);
+});
+
+// Tenta fazer um lance.
+//   enviar   = devemos avisar o adversário online?
+//   promocao = peça que o peão vira ('q' dama, 'r' torre, 'b' bispo, 'n' cavalo)
+//   tempos   = relógios enviados pelo adversário (só no modo online)
+function fazerLance(de, para, enviar, promocao, tempos) {
+  const quemJogou = jogo.turn();
+  const lance = jogo.move({ from: de, to: para, promotion: promocao || 'q' });
+  if (lance === null) return false;           // o juiz recusou
+
+  ultimoLance = { from: de, to: para };
+  animarCasa = para;
+  selecionada = null;
+  destinos = [];
+
+  // Um lance novo cancela qualquer proposta de empate que estava no ar.
+  propusEmpate = false;
+  if (propostaPendente === 'empate') esconderProposta();
+
+  // Som do lance.
+  if (jogo.game_over()) tocarSom('fim');
+  else if (jogo.in_check()) tocarSom('xeque');
+  else if (lance.captured) tocarSom('captura');
+  else tocarSom('lance');
+
+  // Relógio: desconta o tempo gasto, soma o acréscimo e passa a vez.
+  if (relogio.ligado) {
+    const agora = Date.now();
+    if (relogio.rodando) {
+      relogio[quemJogou] = Math.max(1, relogio[quemJogou] - (agora - relogio.ultimo)) + relogio.inc;
+    }
+    if (tempos) { relogio.w = tempos.w; relogio.b = tempos.b; }   // confia no relógio de quem jogou
+    relogio.rodando = true;       // o relógio começa a correr depois do 1º lance
+    relogio.ultimo = agora;
+  }
+
+  if (enviar && conexao && conexao.open) {
+    conexao.send({ tipo: 'lance', from: de, to: para, promocao: promocao || 'q',
+                   tempos: { w: relogio.w, b: relogio.b } });
+  }
+
+  desenhar();
+  atualizarStatus();
+  talvezJogarPC();
+  return true;
+}
+
+
+/* ---------- 7. PROMOÇÃO DO PEÃO ---------- */
+
+function abrirPromocao(de, para) {
+  promocaoPendente = { de: de, para: para };
+  const cor = jogo.turn();
+  // Um botão para cada opção: dama, torre, bispo e cavalo.
+  $('escolhasPromocao').innerHTML = ['q', 'r', 'b', 'n'].map((tipo) =>
+    '<button data-tipo="' + tipo + '" aria-label="' + NOME_PECA[tipo] + '">' +
+    svgPeca(tipo, cor, prefs.pecas) + '</button>').join('');
+  elPromocao.hidden = false;
+}
+
+function fecharPromocao() {
+  promocaoPendente = null;
+  elPromocao.hidden = true;
+}
+
+$('escolhasPromocao').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-tipo]');
+  if (!botao || !promocaoPendente) return;
+  const p = promocaoPendente;
+  fecharPromocao();
+  fazerLance(p.de, p.para, true, botao.dataset.tipo);
+});
+
+$('btnCancelarPromocao').addEventListener('click', () => {
+  fecharPromocao();
+  selecionada = null;
+  destinos = [];
+  desenhar();
+});
+
+
+/* ---------- 8. RELÓGIO ----------
+   Um "tique" acontece 5 vezes por segundo. A cada tique, descontamos do
+   jogador da vez o tempo que passou desde o tique anterior. */
+
+function configurarRelogio(baseSegundos, incSegundos) {
+  relogio.ligado = baseSegundos > 0;
+  relogio.base = baseSegundos * 1000;
+  relogio.inc = incSegundos * 1000;
+  zerarRelogio();
+}
+
+function zerarRelogio() {
+  relogio.w = relogio.base;
+  relogio.b = relogio.base;
+  relogio.rodando = false;
+}
+
+// 65000 ms -> "01:05"
+function formatarTempo(ms) {
+  const total = Math.ceil(ms / 1000);
+  const minutos = Math.floor(total / 60);
+  const segundos = total % 60;
+  return String(minutos).padStart(2, '0') + ':' + String(segundos).padStart(2, '0');
+}
+
+function mostrarRelogios() {
+  document.querySelectorAll('.relogio').forEach((el) => {
+    const cor = el.dataset.cor;
+    el.textContent = formatarTempo(relogio[cor]);
+    el.classList.toggle('pouco', relogio[cor] < 20000);   // menos de 20 s: fica vermelho
+  });
+}
+
+function tique() {
+  if (!relogio.ligado || !relogio.rodando || acabou()) return;
+  const agora = Date.now();
+  const cor = jogo.turn();
+  relogio[cor] -= agora - relogio.ultimo;
+  relogio.ultimo = agora;
+  if (relogio[cor] <= 0) {
+    relogio[cor] = 0;
+    encerrarPorTempo(cor, true);
+  }
+  mostrarRelogios();
+}
+setInterval(tique, 200);
+
+// Termina a partida por um motivo que o juiz não conhece (tempo, desistência, acordo).
+function encerrar(novoResultado) {
+  if (acabou()) return;
+  resultado = novoResultado;
+  cancelarArrasto();
+  fecharPromocao();
+  esconderProposta();
+  selecionada = null;
+  destinos = [];
+  tocarSom('fim');
+  desenhar();
+  atualizarStatus();
+}
+
+function encerrarPorTempo(perdedor, avisarAdversario) {
+  if (acabou()) return;
+  relogio[perdedor] = 0;
+  if (avisarAdversario) enviar({ tipo: 'tempo', cor: perdedor });
+  encerrar({ tipo: 'tempo', perdedor: perdedor });
+}
+
+
+/* ---------- 9. O PC JOGA (INTELIGÊNCIA ARTIFICIAL SIMPLES) ----------
+   O PC não "sabe" xadrez. Ele faz duas coisas:
+     a) AVALIAR: dá uma nota para uma posição (soma o valor das peças).
+     b) BUSCAR: testa lances na imaginação. "Se eu jogar isto, qual a
+        melhor resposta dele? E depois, qual a minha melhor resposta?"
+        Quanto mais fundo ele imagina, mais forte (e mais lento) fica.
+   Esse método se chama MINIMAX. O truque ALFA-BETA só serve para pular
+   lances que já se sabe que são piores, e assim pensar mais rápido. */
+
+const VALOR_PC = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
+
+// Nota da posição: positiva = boa para as brancas, negativa = boa para as pretas.
+function avaliar() {
+  const posicao = jogo.board();
+  let total = 0;
+  for (let l = 0; l < 8; l++) {
+    for (let c = 0; c < 8; c++) {
+      const p = posicao[l][c];
+      if (!p) continue;
+      // "centro" vai de 0 (borda) a 3 (meio do tabuleiro).
+      const centro = 3.5 - Math.max(Math.abs(3.5 - l), Math.abs(3.5 - c));
+      let nota = VALOR_PC[p.type];
+      if (p.type === 'n') nota += centro * 10;          // cavalo gosta do centro
+      else if (p.type === 'b') nota += centro * 5;
+      else if (p.type === 'q') nota += centro * 2;
+      else if (p.type === 'k') nota -= centro * 10;     // rei prefere ficar protegido no canto
+      else if (p.type === 'p') {
+        const avanco = p.color === 'w' ? 6 - l : l - 1; // peão avançado vale mais
+        nota += avanco * 6 + (c >= 2 && c <= 5 ? centro * 6 : 0);
+      }
+      total += p.color === 'w' ? nota : -nota;
+    }
+  }
+  return total;
+}
+
+// Capturas primeiro: ajuda o alfa-beta a cortar mais cedo.
+function ordenar(lances) {
+  lances.sort((a, b) => (b.captured ? VALOR_PC[b.captured] : 0) - (a.captured ? VALOR_PC[a.captured] : 0));
+}
+
+// Devolve a nota da posição do ponto de vista de QUEM ESTÁ NA VEZ.
+function buscar(profundidade, alfa, beta, distancia) {
+  if (profundidade === 0) return (jogo.turn() === 'w' ? 1 : -1) * avaliar();
+
+  const lances = jogo.moves({ verbose: true });
+  if (lances.length === 0) {
+    // Sem lances: ou levou mate (péssimo) ou está afogado (empate = 0).
+    return jogo.in_check() ? -100000 + distancia : 0;
+  }
+  ordenar(lances);
+
+  let melhor = -Infinity;
+  for (let i = 0; i < lances.length; i++) {
+    jogo.move(lances[i]);                                   // joga na imaginação
+    const nota = -buscar(profundidade - 1, -beta, -alfa, distancia + 1);
+    jogo.undo();                                            // desfaz
+    if (nota > melhor) melhor = nota;
+    if (melhor > alfa) alfa = melhor;
+    if (alfa >= beta) break;                                // corte alfa-beta
+  }
+  return melhor;
+}
+
+function escolherLancePC() {
+  const profundidade = NIVEIS[prefs.nivel].profundidade;
+  const lances = jogo.moves({ verbose: true });
+  if (lances.length === 0) return null;
+
+  // Embaralha para o PC não jogar sempre igual, depois põe capturas na frente.
+  for (let i = lances.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = lances[i]; lances[i] = lances[j]; lances[j] = tmp;
+  }
+  ordenar(lances);
+
+  let melhorLance = lances[0];
+  let melhorNota = -Infinity;
+  for (let i = 0; i < lances.length; i++) {
+    jogo.move(lances[i]);
+    let nota = -buscar(profundidade - 1, -Infinity, -melhorNota, 1);
+    jogo.undo();
+    // No nível fácil, o PC "se distrai": somamos um erro aleatório na nota.
+    if (prefs.nivel === 'facil') nota += Math.random() * 240 - 120;
+    if (nota > melhorNota) { melhorNota = nota; melhorLance = lances[i]; }
+  }
+  return melhorLance;
+}
+
+// Se for a vez do PC, ele pensa e joga (com uma pequena pausa para a tela atualizar).
+function talvezJogarPC() {
+  if (modo !== 'pc' || acabou() || jogo.turn() === minhaCor) return;
+  const id = partidaId;
+  setTimeout(() => {
+    if (id !== partidaId || modo !== 'pc' || acabou()) return;   // a partida mudou enquanto ele esperava
+    const lance = escolherLancePC();
+    if (lance) fazerLance(lance.from, lance.to, false, lance.promotion);
+  }, 350);
+}
+
+
+/* ---------- 9B. SONS ----------
+   Não usamos arquivos de áudio. O navegador tem um "sintetizador"
+   (Web Audio): pedimos uma nota com certa frequência (grave/aguda) e
+   duração. Cada som é uma listinha de notas:
+   [frequência em Hz, atraso em s, duração em s, formato da onda] */
+
+const SONS = {
+  lance:   [[190, 0, 0.07, 'triangle']],
+  captura: [[150, 0, 0.06, 'square'], [105, 0.06, 0.10, 'square']],
+  xeque:   [[660, 0, 0.09, 'sine'], [880, 0.10, 0.14, 'sine']],
+  fim:     [[523, 0, 0.14, 'sine'], [392, 0.15, 0.14, 'sine'], [262, 0.30, 0.30, 'sine']]
+};
+
+let audio = null;           // o sintetizador (criado no primeiro som)
+
+function tocarSom(nome) {
+  if (!prefs.sons) return;
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+    SONS[nome].forEach((nota) => {
+      const inicio = audio.currentTime + nota[1];
+      const oscilador = audio.createOscillator();   // gera a onda sonora
+      const volume = audio.createGain();            // controla o volume
+      oscilador.type = nota[3];
+      oscilador.frequency.value = nota[0];
+      // Volume sobe rápido e desce suave: evita "estalos".
+      volume.gain.setValueAtTime(0.0001, inicio);
+      volume.gain.exponentialRampToValueAtTime(nota[3] === 'square' ? 0.07 : 0.2, inicio + 0.008);
+      volume.gain.exponentialRampToValueAtTime(0.0001, inicio + nota[2]);
+      oscilador.connect(volume);
+      volume.connect(audio.destination);
+      oscilador.start(inicio);
+      oscilador.stop(inicio + nota[2] + 0.02);
+    });
+  } catch (erro) { /* navegador sem som: o jogo segue normalmente */ }
+}
+
+
+/* ---------- 9C. DESISTIR, EMPATE E REVANCHE ---------- */
+
+// Manda uma mensagem ao adversário (se houver um conectado).
+function enviar(mensagem) {
+  if (conexao && conexao.open) conexao.send(mensagem);
+}
+
+// Mostra só os botões que fazem sentido no momento.
+function atualizarBotoes() {
+  const emJogo = modo !== null && !acabou();
+  const conectado = modo !== 'online' || Boolean(conexao && conexao.open);
+
+  $('btnDesistir').hidden = !(emJogo && conectado);
+  $('btnEmpate').hidden = !(emJogo && conectado);
+  if (!confirmandoDesistencia) $('btnDesistir').textContent = 'Desistir';
+
+  if (modo === 'online') {
+    // Online não dá para reiniciar sozinho: no fim, pede-se revanche.
+    $('btnNova').textContent = 'Pedir revanche';
+    $('btnNova').hidden = !(acabou() && conectado);
+  } else {
+    $('btnNova').textContent = 'Nova partida';
+    $('btnNova').hidden = false;
+  }
+
+  $('chat').hidden = !(modo === 'online' && conexao && conexao.open);
+}
+
+// DESISTIR: pede um segundo toque para confirmar (evita desistir sem querer).
+$('btnDesistir').addEventListener('click', () => {
+  if (!confirmandoDesistencia) {
+    confirmandoDesistencia = true;
+    $('btnDesistir').textContent = 'Confirmar desistência';
+    setTimeout(() => { confirmandoDesistencia = false; atualizarBotoes(); }, 3000);
+    return;
+  }
+  confirmandoDesistencia = false;
+  if (acabou()) return;
+  // A dois no mesmo aparelho, desiste quem está na vez. Nos outros modos, você.
+  const perdedor = modo === 'local' ? jogo.turn() : minhaCor;
+  enviar({ tipo: 'desistir' });
+  encerrar({ tipo: 'desistencia', perdedor: perdedor });
+});
+
+// PROPOR EMPATE
+$('btnEmpate').addEventListener('click', () => {
+  if (acabou()) return;
+
+  if (modo === 'local') {
+    encerrar({ tipo: 'acordo' });             // os dois estão juntos: combinam na conversa
+
+  } else if (modo === 'pc') {
+    // O PC aceita se não estiver ganhando e a partida já tiver 10 lances de cada lado.
+    const notaDoPC = (minhaCor === 'w' ? -1 : 1) * avaliar();
+    if (notaDoPC <= 0 && jogo.history().length >= 20) encerrar({ tipo: 'acordo' });
+    else atualizarStatus('O PC recusou o empate.');
+
+  } else if (modo === 'online') {
+    propusEmpate = true;
+    enviar({ tipo: 'empate-proposta' });
+    atualizarStatus('Proposta de empate enviada. Aguardando a resposta.');
+  }
+});
+
+function pedirRevanche() {
+  propusRevanche = true;
+  enviar({ tipo: 'revanche-proposta' });
+  atualizarStatus('Pedido de revanche enviado. Aguardando a resposta.');
+}
+
+// Na revanche as cores trocam: quem foi de brancas vai de pretas.
+function iniciarRevanche() {
+  minhaCor = minhaCor === 'w' ? 'b' : 'w';
+  limparPartida();
+  desenhar();
+  atualizarStatus();
+}
+
+function mostrarProposta(tipo) {
+  propostaPendente = tipo;
+  $('textoProposta').textContent = tipo === 'empate'
+    ? 'O adversário propôs empate.'
+    : 'O adversário pediu revanche. As cores trocam.';
+  $('proposta').hidden = false;
+  tocarSom('xeque');
+}
+
+function esconderProposta() {
+  propostaPendente = null;
+  $('proposta').hidden = true;
+}
+
+$('btnAceitar').addEventListener('click', () => {
+  const tipo = propostaPendente;
+  esconderProposta();
+  if (tipo === 'empate') {
+    enviar({ tipo: 'empate-aceito' });
+    encerrar({ tipo: 'acordo' });
+  } else if (tipo === 'revanche') {
+    enviar({ tipo: 'revanche-aceita' });
+    iniciarRevanche();
+  }
+});
+
+$('btnRecusar').addEventListener('click', () => {
+  enviar({ tipo: 'recusa', de: propostaPendente });
+  esconderProposta();
+});
+
+
+/* ---------- 9D. CHAT ---------- */
+
+function adicionarMensagem(quem, texto) {
+  const linha = document.createElement('p');
+  const autor = document.createElement('strong');
+  autor.textContent = quem + ': ';
+  linha.appendChild(autor);
+  // IMPORTANTE: usamos createTextNode (texto puro) e NUNCA innerHTML aqui.
+  // Assim, se alguém mandar "<script>...", aparece como texto e não é executado.
+  linha.appendChild(document.createTextNode(texto));
+  $('mensagens').appendChild(linha);
+  $('mensagens').scrollTop = $('mensagens').scrollHeight;
+}
+
+$('formChat').addEventListener('submit', (evento) => {
+  evento.preventDefault();                    // não deixa o formulário recarregar a página
+  const texto = $('textoChat').value.trim().slice(0, 200);
+  if (!texto || !conexao || !conexao.open) return;
+  enviar({ tipo: 'chat', texto: texto });
+  adicionarMensagem('Você', texto);
+  $('textoChat').value = '';
+});
+
+
+/* ---------- 10. MENSAGEM DE STATUS ---------- */
+
+function atualizarStatus(textoFixo, tipo) {
+  elStatus.className = 'status' + (tipo ? ' ' + tipo : '');
+  if (textoFixo) { elStatus.textContent = textoFixo; return; }
+
+  let texto;
+  if (resultado) {
+    const vencedor = resultado.perdedor === 'w' ? 'pretas' : 'brancas';
+    if (resultado.tipo === 'tempo') texto = 'Tempo esgotado. Vitória das ' + vencedor + '.';
+    else if (resultado.tipo === 'desistencia') {
+      texto = 'As ' + (resultado.perdedor === 'w' ? 'brancas' : 'pretas') + ' desistiram. Vitória das ' + vencedor + '.';
+    } else texto = 'Empate por acordo.';
+    elStatus.classList.add('fim');
+  } else if (jogo.in_checkmate()) {
+    texto = 'Xeque-mate. Vitória das ' + (jogo.turn() === 'w' ? 'pretas' : 'brancas') + '.';
+    elStatus.classList.add('fim');
+  } else if (jogo.in_draw()) {
+    texto = 'Empate.';
+    elStatus.classList.add('fim');
+  } else {
+    texto = 'Vez das ' + (jogo.turn() === 'w' ? 'brancas' : 'pretas') + '.';
+    if (jogo.in_check()) { texto += ' Xeque!'; elStatus.classList.add('alerta'); }
+    if (modo === 'online') texto += jogo.turn() === minhaCor ? ' É a sua vez.' : ' Aguardando o adversário.';
+    if (modo === 'pc')     texto += jogo.turn() === minhaCor ? ' É a sua vez.' : ' O PC está pensando.';
+  }
+  elStatus.textContent = texto;
+}
+
+
+/* ---------- 11. O CARTEIRO (JOGO ONLINE) ---------- */
+
+function gerarCodigo() {
+  const letras = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let codigo = '';
+  for (let i = 0; i < 6; i++) codigo += letras[Math.floor(Math.random() * letras.length)];
+  return codigo;
+}
+
+function ligarPeer(id) {
+  if (typeof Peer === 'undefined') {
+    atualizarStatus('O modo online não carregou. Verifique sua internet e recarregue a página.', 'alerta');
+    return false;
+  }
+  try {
+    peer = id ? new Peer(id) : new Peer();
+  } catch (erro) {
+    atualizarStatus('Este navegador não permitiu a conexão online.', 'alerta');
+    return false;
+  }
+
+  peer.on('error', (erro) => {
+    if (modo !== 'online') return;
+    if (erro.type === 'peer-unavailable') {
+      atualizarStatus('Sala não encontrada. Peça um link novo a quem convidou.', 'alerta');
+    } else if (erro.type === 'unavailable-id') {
+      atualizarStatus('Esse código de sala já está em uso. Volte ao menu e crie outra.', 'alerta');
+    } else {
+      atualizarStatus('Não foi possível conectar. O modo online só funciona com o site ' +
+                      'hospedado na internet (por exemplo, no GitHub Pages).', 'alerta');
+    }
+  });
+  return true;
+}
+
+// JOGADOR 1: cria a sala e gera o link. Escolhe a cor e o relógio.
+function criarSala() {
+  const codigo = gerarCodigo();
+  if (!ligarPeer(PREFIXO_SALA + codigo)) return;
+
+  anfitriao = true;
+  comecar('online', corEscolhida());
+  configurarRelogio(TEMPOS[prefs.tempo].base, TEMPOS[prefs.tempo].inc);
+  atualizarStatus('Criando a sala...');
+
+  peer.on('open', () => {
+    elLink.value = location.origin + location.pathname + '?sala=' + codigo;
+    elConvite.hidden = false;
+    atualizarStatus('Sala criada. Envie o link e aguarde seu amigo entrar.');
+  });
+
+  peer.on('connection', (novaConexao) => {
+    if (conexao) { novaConexao.close(); return; }   // a sala já tem 2 jogadores
+    conexao = novaConexao;
+    prepararConexao();
+  });
+
+  desenhar();
+}
+
+// JOGADOR 2: abriu o link do convite. Fica com a cor que sobrou.
+function entrarNaSala(codigo) {
+  if (!ligarPeer()) return;
+
+  anfitriao = false;
+  comecar('online', 'b');                     // cor provisória: a certa chega na mensagem 'inicio'
+  configurarRelogio(0, 0);                    // o relógio também
+  atualizarStatus('Entrando na sala...');
+
+  peer.on('open', () => {
+    conexao = peer.connect(PREFIXO_SALA + codigo, { reliable: true });
+    prepararConexao();
+  });
+
+  desenhar();
+}
+
+function prepararConexao() {
+  conexao.on('open', () => {
+    elConvite.hidden = true;
+    // Quem criou a sala manda a posição e o relógio escolhido.
+    if (anfitriao) {
+      conexao.send({ tipo: 'inicio', fen: jogo.fen(),
+                     corConvidado: minhaCor === 'w' ? 'b' : 'w',
+                     base: relogio.base / 1000, inc: relogio.inc / 1000 });
+    }
+    desenhar();
+    atualizarStatus();
+  });
+
+  conexao.on('data', (msg) => {
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.tipo === 'lance') {
+      // Segurança: só aceita lance do adversário na vez DELE, e o nosso
+      // juiz confere de novo (nunca confie no que vem pela internet).
+      if (acabou() || jogo.turn() === minhaCor) return;
+      const promocao = ['q', 'r', 'b', 'n'].includes(msg.promocao) ? msg.promocao : 'q';
+      const tempos = (msg.tempos && msg.tempos.w > 0 && msg.tempos.b > 0) ? msg.tempos : null;
+      fazerLance(msg.from, msg.to, false, promocao, tempos);
+
+    } else if (msg.tipo === 'inicio') {
+      if (anfitriao) return;                  // só o convidado obedece ao 'inicio'
+      minhaCor = msg.corConvidado === 'w' ? 'w' : 'b';
+      jogo.load(msg.fen);
+      configurarRelogio(Number(msg.base) || 0, Number(msg.inc) || 0);
+      ultimoLance = null;
+      desenhar();
+      atualizarStatus();
+
+    } else if (msg.tipo === 'tempo') {
+      if (msg.cor === 'w' || msg.cor === 'b') encerrarPorTempo(msg.cor, false);
+
+    } else if (msg.tipo === 'desistir') {
+      encerrar({ tipo: 'desistencia', perdedor: minhaCor === 'w' ? 'b' : 'w' });
+
+    } else if (msg.tipo === 'empate-proposta') {
+      if (!acabou()) mostrarProposta('empate');
+
+    } else if (msg.tipo === 'empate-aceito') {
+      if (propusEmpate) encerrar({ tipo: 'acordo' });     // só vale se EU propus
+
+    } else if (msg.tipo === 'revanche-proposta') {
+      if (acabou()) mostrarProposta('revanche');
+
+    } else if (msg.tipo === 'revanche-aceita') {
+      if (propusRevanche) iniciarRevanche();
+
+    } else if (msg.tipo === 'recusa') {
+      propusEmpate = false;
+      propusRevanche = false;
+      atualizarStatus(msg.de === 'revanche' ? 'O adversário recusou a revanche.'
+                                            : 'O adversário recusou o empate.');
+
+    } else if (msg.tipo === 'chat') {
+      if (typeof msg.texto === 'string' && msg.texto.trim()) {
+        adicionarMensagem('Adversário', msg.texto.slice(0, 200));
+      }
+    }
+  });
+
+  conexao.on('close', () => {
+    if (modo !== 'online') return;
+    esconderProposta();
+    atualizarBotoes();
+    atualizarStatus('O adversário saiu da partida.', 'alerta');
+  });
+}
+
+
+/* ---------- 12. COMEÇAR, REINICIAR E VOLTAR AO MENU ---------- */
+
+// Prepara a tela para uma partida no modo escolhido.
+function comecar(novoModo, cor) {
+  modo = novoModo;
+  minhaCor = cor;
+  elPainel.hidden = true;
+  elAcoes.hidden = false;
+}
+
+function jogarLocal() {
+  comecar('local', 'w');
+  configurarRelogio(TEMPOS[prefs.tempo].base, TEMPOS[prefs.tempo].inc);
+  desenhar();
+  atualizarStatus();
+}
+
+// Devolve 'w' ou 'b' conforme a escolha no menu (ou sorteia).
+function corEscolhida() {
+  if (prefs.cor === 'sorteio') return Math.random() < 0.5 ? 'w' : 'b';
+  return prefs.cor;
+}
+
+function jogarContraPC() {
+  comecar('pc', corEscolhida());
+  configurarRelogio(TEMPOS[prefs.tempo].base, TEMPOS[prefs.tempo].inc);
+  desenhar();
+  atualizarStatus();
+  talvezJogarPC();                            // se você escolheu pretas, o PC abre o jogo
+}
+
+function limparPartida() {
+  partidaId++;
+  jogo.reset();
+  resultado = null;
+  selecionada = null;
+  destinos = [];
+  ultimoLance = null;
+  propusEmpate = false;
+  propusRevanche = false;
+  confirmandoDesistencia = false;
+  cancelarArrasto();
+  esconderProposta();
+  fecharPromocao();
+  zerarRelogio();
+}
+
+// Nova partida (a dois no aparelho ou contra o PC).
+function reiniciar() {
+  limparPartida();
+  desenhar();
+  atualizarStatus();
+  talvezJogarPC();
+}
+
+function voltarAoMenu() {
+  // Desliga o carteiro, se estiver ligado.
+  try { if (conexao) conexao.close(); } catch (erro) {}
+  try { if (peer) peer.destroy(); } catch (erro) {}
+  conexao = null;
+  peer = null;
+  anfitriao = false;
+  $('mensagens').innerHTML = '';              // limpa o chat
+
+  modo = null;
+  minhaCor = 'w';
+  limparPartida();
+  configurarRelogio(0, 0);
+
+  elPainel.hidden = false;
+  elAcoes.hidden = true;
+  elConvite.hidden = true;
+  desenhar();
+  atualizarStatus('Escolha como quer jogar.');
+}
+
+
+/* ---------- 13. MENU: ESCOLHA DE RELÓGIO, NÍVEL E COR ---------- */
+
+function montarMenu() {
+  $('chipsRelogio').innerHTML = Object.keys(TEMPOS).map((chave) =>
+    '<button class="chip" data-tempo="' + chave + '" aria-pressed="' + (chave === prefs.tempo) + '">' +
+    TEMPOS[chave].nome + '</button>').join('');
+
+  $('chipsNivel').innerHTML = Object.keys(NIVEIS).map((chave) =>
+    '<button class="chip" data-nivel="' + chave + '" aria-pressed="' + (chave === prefs.nivel) + '">' +
+    NIVEIS[chave].nome + '</button>').join('');
+
+  $('chipsCor').innerHTML = Object.keys(CORES).map((chave) =>
+    '<button class="chip" data-cor="' + chave + '" aria-pressed="' + (chave === prefs.cor) + '">' +
+    CORES[chave] + '</button>').join('');
+}
+
+$('chipsCor').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-cor]');
+  if (!botao) return;
+  prefs.cor = botao.dataset.cor;
+  salvarPrefs();
+  montarMenu();
+});
+
+$('chipsRelogio').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-tempo]');
+  if (!botao) return;
+  prefs.tempo = botao.dataset.tempo;
+  salvarPrefs();
+  montarMenu();
+});
+
+$('chipsNivel').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-nivel]');
+  if (!botao) return;
+  prefs.nivel = botao.dataset.nivel;
+  salvarPrefs();
+  montarMenu();
+});
+
+
+/* ---------- 14. TELA DE APARÊNCIA ---------- */
+
+function montarAparencia() {
+  $('opcoesTema').innerHTML = Object.keys(TEMAS).map((chave) => {
+    const t = TEMAS[chave];
+    return '<button class="opcao" data-tema="' + chave + '" aria-pressed="' + (chave === prefs.tema) + '">' +
+      '<span class="mini">' +
+        '<span style="background:' + t.clara + '"></span><span style="background:' + t.escura + '"></span>' +
+        '<span style="background:' + t.escura + '"></span><span style="background:' + t.clara + '"></span>' +
+      '</span>' + t.nome + '</button>';
+  }).join('');
+
+  $('opcoesPecas').innerHTML = Object.keys(NOMES_CONJUNTOS).map((chave) => {
+    return '<button class="opcao" data-pecas="' + chave + '" aria-pressed="' + (chave === prefs.pecas) + '">' +
+      '<span class="amostra">' +
+        '<span class="quadro">' + svgPeca('n', 'w', chave) + '</span>' +
+        '<span class="quadro">' + svgPeca('n', 'b', chave) + '</span>' +
+      '</span>' + NOMES_CONJUNTOS[chave] + '</button>';
+  }).join('');
+
+  $('chkCoordenadas').checked = prefs.coordenadas;
+  $('chkDicas').checked = prefs.dicas;
+  $('chkSons').checked = prefs.sons;
+}
+
+function mudouAparencia() {
+  salvarPrefs();
+  aplicarTema();
+  montarAparencia();
+  desenhar();
+}
+
+$('opcoesTema').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-tema]');
+  if (!botao) return;
+  prefs.tema = botao.dataset.tema;
+  mudouAparencia();
+});
+
+$('opcoesPecas').addEventListener('click', (evento) => {
+  const botao = evento.target.closest('[data-pecas]');
+  if (!botao) return;
+  prefs.pecas = botao.dataset.pecas;
+  mudouAparencia();
+});
+
+$('chkCoordenadas').addEventListener('change', (e) => { prefs.coordenadas = e.target.checked; mudouAparencia(); });
+$('chkDicas').addEventListener('change', (e) => { prefs.dicas = e.target.checked; mudouAparencia(); });
+$('chkSons').addEventListener('change', (e) => {
+  prefs.sons = e.target.checked;
+  salvarPrefs();
+  tocarSom('lance');                          // toca uma amostra ao ligar
+});
+
+function abrirAparencia()  { montarAparencia(); $('folha').hidden = false; $('btnFechar').focus(); }
+function fecharAparencia() { $('folha').hidden = true; $('btnAparencia').focus(); }
+
+$('btnAparencia').addEventListener('click', abrirAparencia);
+$('btnFechar').addEventListener('click', fecharAparencia);
+$('folha').addEventListener('click', (e) => { if (e.target === $('folha')) fecharAparencia(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('folha').hidden) fecharAparencia(); });
+
+
+/* ---------- 15. BOTÕES DO JOGO ---------- */
+
+$('btnOnline').addEventListener('click', criarSala);
+$('btnPC').addEventListener('click', jogarContraPC);
+$('btnLocal').addEventListener('click', jogarLocal);
+$('btnNova').addEventListener('click', () => {
+  if (modo === 'online') pedirRevanche();
+  else reiniciar();
+});
+$('btnMenu').addEventListener('click', voltarAoMenu);
+
+$('btnCopiar').addEventListener('click', () => {
+  const botao = $('btnCopiar');
+  try {
+    navigator.clipboard.writeText(elLink.value)
+      .then(() => { botao.textContent = 'Link copiado'; })
+      .catch(() => { elLink.select(); botao.textContent = 'Selecione e copie o link acima'; });
+  } catch (erro) {
+    elLink.select();
+    botao.textContent = 'Selecione e copie o link acima';
+  }
+});
+
+
+/* ---------- 16. INÍCIO ---------- */
+
+carregarPrefs();
+aplicarTema();
+montarMenu();
+desenhar();
+
+// Se o endereço tiver "?sala=...", a pessoa veio por um convite.
+const codigoNoLink = new URLSearchParams(location.search).get('sala');
+if (codigoNoLink) entrarNaSala(codigoNoLink);
+</script>
+</body>
+</html>
